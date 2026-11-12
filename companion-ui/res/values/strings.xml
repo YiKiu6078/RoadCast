@@ -1,0 +1,33 @@
+<resources>
+    <string name="companion_sender_title">RoadCast companion sender</string>
+    <string name="companion_receiver_title">RoadCast companion</string>
+    <string name="companion_start">Start sharing</string>
+    <string name="companion_stop">Stop sharing</string>
+    <string name="companion_forget">Forget paired sender</string>
+    <string name="companion_reset">Reset pairing and stop sharing</string>
+    <string name="companion_idle">Sharing is off</string>
+    <string name="companion_help">Pair once on trusted Wi-Fi using the address and code. The phone then remembers this sender and reconnects automatically, including after IP changes when network discovery is available. Sharing resumes when RoadCast opens until you stop it. Audio stays on the head unit. Traffic is not encrypted.</string>
+    <string name="companion_code">Pairing code: %1$s</string>
+    <string name="companion_addresses">Addresses (choose the reachable Wi-Fi address):\n%1$s</string>
+    <string name="companion_no_address">No network address. Connect Wi-Fi and try again.</string>
+    <string name="companion_address_hint">Sender IP:port, e.g. 192.168.1.10:8766</string>
+    <string name="companion_code_hint">8-digit code (leave blank for a remembered sender)</string>
+    <string name="companion_connect">Connect</string>
+    <string name="companion_connection">Connection settings</string>
+    <string name="companion_disconnect">Disconnect</string>
+    <string name="companion_connecting">Connecting…</string>
+    <string name="companion_retry">Disconnected; retrying. Check Wi-Fi, address and pairing code.</string>
+    <string name="companion_waiting">Connected · waiting for CarPlay</string>
+    <string name="companion_live">Connected · live</string>
+    <string name="companion_stale">No fresh data · waiting to reconnect</string>
+    <string name="companion_no_route">No active guidance</string>
+    <string name="companion_no_music">No music metadata</string>
+    <string name="companion_text_note">Title / available lyrics (provided by the music app)</string>
+    <string name="companion_bad_address">Enter an IPv4 address:port and an 8-digit code.</string>
+    <string name="companion_permission">Local network permission is required. After granting it, tap Start / Connect again.</string>
+    <string name="companion_error">Could not start sharing. Check permissions or whether the port is in use.</string>
+    <string name="companion_running">Sharing navigation and music with your companion phone</string>
+    <string name="companion_distance">%1$d m</string>
+    <string name="companion_remaining">Remaining %1$s · %2$s min</string>
+    <string name="companion_paused">Paused</string>
+</resources>

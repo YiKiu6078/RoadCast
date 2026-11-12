@@ -1,0 +1,16 @@
+<resources>
+    <string name="maphost_title">My launcher</string>
+    <string name="maphost_smaller">Smaller</string>
+    <string name="maphost_larger">Larger</string>
+    <string name="maphost_stopped">RoadCast stopped; waiting for it to come back</string>
+    <string name="maphost_not_installed">RoadCast is not installed</string>
+    <string name="maphost_connecting">Connecting to %1$s</string>
+    <string name="maphost_refused">RoadCast refused the connection</string>
+    <string name="maphost_requesting">Asking RoadCast for the map</string>
+    <string name="maphost_missing">RoadCast sent no map</string>
+    <string name="maphost_disabled">Turn on \"Share the live map with other launchers\" in RoadCast</string>
+    <string name="maphost_unsupported">This head unit is too old (Android 11 or newer is needed)</string>
+    <string name="maphost_error">RoadCast could not show the map: %1$s</string>
+    <string name="maphost_live">Live map from RoadCast. Tap it to open CarPlay.</string>
+    <string name="maphost_waiting">Map attached; waiting for CarPlay</string>
+</resources>
