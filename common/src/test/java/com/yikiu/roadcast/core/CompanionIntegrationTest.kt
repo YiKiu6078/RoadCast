@@ -13,6 +13,67 @@ import java.net.Socket
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE)
 class CompanionIntegrationTest {
+    @Test fun senderIdentitySurvivesRestartsAndOnlyExplicitResetChangesToken() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val prefs = context.getSharedPreferences("roadcast-companion-sender", 0)
+        prefs.edit().clear().commit()
+        try {
+            val first = CompanionSenderIdentity.load(context)
+            assertEquals(first, CompanionSenderIdentity.load(context))
+            prefs.edit().remove("token").commit()
+            val reset = CompanionSenderIdentity.load(context)
+            assertEquals(first.id, reset.id)
+            assertNotEquals(first.token, reset.token)
+        } finally { prefs.edit().clear().commit() }
+    }
+
+    @Test fun authenticatedPhoneGetsPairingConfirmationBeforeAnyMediaSnapshot() {
+        val id = "12345678-1234-1234-1234-123456789abc"
+        val token = "0123456789abcdef0123456789abcdef"
+        val opened = java.util.concurrent.CountDownLatch(1)
+        val server = CompanionSocketServer("12345678", 0, token, id) { if (it) opened.countDown() }
+        server.start(3000, true)
+        try {
+            Socket("127.0.0.1", server.listeningPort).use { socket ->
+                socket.soTimeout = 3000
+                socket.getOutputStream().write(("GET /12345678 HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+                    "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").toByteArray())
+                assertTrue(headers(socket).contains("101"))
+                val input = java.io.DataInputStream(socket.getInputStream())
+                assertEquals(0x81, input.readUnsignedByte())
+                var length = input.readUnsignedByte()
+                if (length == 126) length = input.readUnsignedShort()
+                assertTrue(length in 1..4096)
+                val payload = ByteArray(length)
+                input.readFully(payload)
+                val ack = JSONObject(String(payload))
+                assertEquals("paired", ack.getString("type"))
+                assertEquals(token, ack.getJSONObject("pairing").getString("token"))
+                assertTrue(opened.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            }
+        } finally { server.stop() }
+    }
+
+    @Test fun badShortCodesCannotLockOutAPreviouslyPairedPhone() {
+        val token = "0123456789abcdef0123456789abcdef"
+        val server = CompanionSocketServer("12345678", 0, token)
+        server.start(3000, true)
+        try {
+            repeat(11) {
+                Socket("127.0.0.1", server.listeningPort).use { socket ->
+                    socket.soTimeout = 3000
+                    socket.getOutputStream().write("GET /wrong HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".toByteArray())
+                    assertTrue(headers(socket).contains("403"))
+                }
+            }
+            Socket("127.0.0.1", server.listeningPort).use { socket ->
+                socket.soTimeout = 3000
+                socket.getOutputStream().write(("GET /paired HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer $token\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+                    "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").toByteArray())
+                assertTrue(headers(socket).contains("101"))
+            }
+        } finally { server.stop() }
+    }
     @Test fun disconnectedSnapshotNeverLeaksRetainedSongOrArtwork() {
         val json = JSONObject(CompanionWire.snapshot("session", 1, CarPlayGlance.Snapshot(),
             CarPlayNowPlaying(title = "old track", artist = "old artist"), "old cover"))
@@ -68,6 +129,30 @@ class CompanionIntegrationTest {
             text.append(next.toChar())
         }
         return text.toString()
+    }
+
+    @Test fun hotspotProbeExposesOnlyPublicIdentityAndDoesNotConsumePairingAttempts() {
+        val server = CompanionSocketServer("12345678", 0, "private-token", "12345678-1234-1234-1234-123456789abc")
+        server.start(3000, true)
+        try {
+            repeat(12) {
+                Socket("127.0.0.1", server.listeningPort).use { socket ->
+                    socket.soTimeout = 3000
+                    socket.getOutputStream().write("GET /companion-info HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".toByteArray())
+                    val response = socket.getInputStream().bufferedReader().readText()
+                    assertTrue(response.contains("200"))
+                    assertTrue(response.contains("roadcast-companion"))
+                    assertFalse(response.contains("private-token"))
+                    assertFalse(response.contains("12345678\""))
+                }
+            }
+            Socket("127.0.0.1", server.listeningPort).use { socket ->
+                socket.soTimeout = 3000
+                socket.getOutputStream().write(("GET /12345678 HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+                    "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").toByteArray())
+                assertTrue(headers(socket).contains("101"))
+            }
+        } finally { server.stop() }
     }
 
     @Test fun rememberedTokenWorksAfterTheShortPairingCodeChanges() {

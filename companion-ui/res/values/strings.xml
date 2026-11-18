@@ -1,4 +1,19 @@
 <resources>
+    <string name="companion_return">Return to RoadCast / CarPlay</string>
+    <string name="companion_reset_warning">This removes all paired phones. They will need a new pairing code. Stop sharing instead if you want to keep them paired.</string>
+    <string name="companion_pairing_saved">Pairing saved · waiting for live data</string>
+    <string name="companion_remembered_retry">Retrying the saved pairing. No new code is needed unless the car pairing was reset.</string>
+    <string name="companion_save_failed">Could not save pairing. Check available storage and try again.</string>
+    <string name="companion_sender_busy">Another phone is connected. Disconnect it on that phone first.</string>
+    <string name="companion_hotspot_help">Connect this phone to the car hotspot in Wi-Fi settings. Start sharing on the car, then enter its pairing code here. The sender is found automatically; no IP address is needed.</string>
+    <string name="companion_wifi_settings">Connect to car hotspot</string>
+    <string name="companion_need_code">Enter the 8-digit pairing code shown on the car.</string>
+    <string name="companion_no_wifi">Connect this phone to the car hotspot first.</string>
+    <string name="companion_searching">Searching for the car on Wi-Fi…</string>
+    <string name="companion_sender_missing">Wi-Fi connected. No RoadCast sender found; check the car hotspot and start sharing on the car.</string>
+    <string name="companion_sender_found">RoadCast sender found. Enter its pairing code to connect.</string>
+    <string name="companion_wrong_sender">This is not the paired car. Connect to its hotspot, or forget the old pairing.</string>
+    <string name="companion_pairing_refused">Pairing refused. Check the code, or pair again after a sender reset.</string>
     <string name="companion_sender_title">RoadCast companion sender</string>
     <string name="companion_receiver_title">RoadCast companion</string>
     <string name="companion_start">Start sharing</string>

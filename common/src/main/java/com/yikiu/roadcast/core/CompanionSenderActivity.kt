@@ -21,8 +21,14 @@ import java.util.Collections
 class CompanionSenderActivity : Activity() {
     private val main = Handler(Looper.getMainLooper())
     private lateinit var status: TextView
+    private var returnOnConnection = false
     private val refresh = object : Runnable {
         override fun run() {
+            if (returnOnConnection && CompanionSenderService.receiverConnected) {
+                returnOnConnection = false
+                openRoadCast()
+                return
+            }
             val code = CompanionSenderService.pairingCode
             status.text = when {
                 code != null -> getString(R.string.companion_code, code) + "\n\n" + getString(R.string.companion_addresses, addresses())
@@ -34,6 +40,7 @@ class CompanionSenderActivity : Activity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        returnOnConnection = !CompanionSenderService.receiverConnected
         val gap = (20 * resources.displayMetrics.density).toInt()
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -51,6 +58,7 @@ class CompanionSenderActivity : Activity() {
                     requestPermissions(arrayOf("android.permission.ACCESS_LOCAL_NETWORK"), 37)
                     android.widget.Toast.makeText(context, R.string.companion_permission, android.widget.Toast.LENGTH_LONG).show()
                 } else {
+                    returnOnConnection = true
                     val intent = Intent(this@CompanionSenderActivity, CompanionSenderService::class.java)
                     if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
                 }
@@ -61,16 +69,30 @@ class CompanionSenderActivity : Activity() {
             setOnClickListener { CompanionSenderService.disable(this@CompanionSenderActivity) }
         })
         content.addView(Button(this).apply {
+            setText(R.string.companion_return)
+            setOnClickListener { openRoadCast() }
+        })
+        content.addView(Button(this).apply {
             setText(R.string.companion_reset)
             setOnClickListener {
-                CompanionSenderService.disable(this@CompanionSenderActivity)
-                getSharedPreferences("roadcast-companion-sender", MODE_PRIVATE).edit().remove("token").apply()
+                android.app.AlertDialog.Builder(this@CompanionSenderActivity)
+                    .setMessage(R.string.companion_reset_warning)
+                    .setPositiveButton(R.string.companion_reset) { _, _ ->
+                        CompanionSenderService.disable(this@CompanionSenderActivity)
+                        getSharedPreferences("roadcast-companion-sender", MODE_PRIVATE).edit().remove("token").commit()
+                    }.setNegativeButton(android.R.string.cancel, null).show()
             }
         })
         setContentView(ScrollView(this).apply { setBackgroundColor(Color.rgb(15, 22, 34)); addView(content) })
     }
     override fun onResume() { super.onResume(); main.post(refresh) }
     override fun onPause() { main.removeCallbacks(refresh); super.onPause() }
+    private fun openRoadCast() {
+        val target = if (CarPlayBackgroundSession.hasSession()) CarPlayScreen.intent(this)
+            else Intent(this, RoadCastActivity::class.java)
+        startActivity(target.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        finish()
+    }
     private fun addresses(): String = runCatching {
         Collections.list(NetworkInterface.getNetworkInterfaces()).filter { it.isUp && !it.isLoopback }
             .flatMap { Collections.list(it.inetAddresses) }.filterIsInstance<Inet4Address>()

@@ -58,9 +58,12 @@ class CompanionSenderService : Service() {
         else startForeground(8766, notification)
         val code = String.format(Locale.ROOT, "%08d", SecureRandom().nextInt(100_000_000))
         val preferences = getSharedPreferences(PREFS, MODE_PRIVATE)
-        val identity = preferences.getString("id", null) ?: UUID.randomUUID().toString()
-        val token = preferences.getString("token", null) ?: UUID.randomUUID().toString().replace("-", "")
-        val next = CompanionSocketServer(code, token = token)
+        val saved = runCatching { CompanionSenderIdentity.load(this) }.getOrElse {
+            error = true; stopSelf(); return START_NOT_STICKY
+        }
+        val identity = saved.id
+        val token = saved.token
+        val next = CompanionSocketServer(code, token = token, senderId = identity, connected = { receiverConnected = it })
         try {
             next.start(6_000, true)
             server = next
@@ -140,6 +143,8 @@ class CompanionSenderService : Service() {
         }
         @Volatile var pairingCode: String? = null
             private set
+        @Volatile var receiverConnected = false
+            internal set
         @Volatile var error = false
             private set
     }

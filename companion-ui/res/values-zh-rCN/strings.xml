@@ -1,4 +1,19 @@
 <resources>
+    <string name="companion_return">返回 RoadCast / CarPlay</string>
+    <string name="companion_reset_warning">这会清除所有手机的配对，之后必须重新输入配对码。如果只是暂时不用副屏，请选择停止共享。</string>
+    <string name="companion_pairing_saved">配对已保存，正在等待实时数据</string>
+    <string name="companion_remembered_retry">正在使用已保存的配对重试，无需输入新码；仅车机重置配对后需要重新配对。</string>
+    <string name="companion_save_failed">无法保存配对，请检查存储空间后重试。</string>
+    <string name="companion_sender_busy">已有另一台副屏连接，请先在那台手机上断开。</string>
+    <string name="companion_hotspot_help">先在手机 Wi-Fi 设置连接车机热点，再在车机开启副屏共享。这里输入车机显示的配对码即可，不需要输入 IP，系统会自动寻找车机。</string>
+    <string name="companion_wifi_settings">连接车机热点</string>
+    <string name="companion_need_code">请输入车机显示的 8 位配对码。</string>
+    <string name="companion_no_wifi">请先将手机连接到车机热点。</string>
+    <string name="companion_searching">正在 Wi-Fi 网络中寻找车机…</string>
+    <string name="companion_sender_missing">已连接 Wi-Fi，未找到 RoadCast。请确认连的是车机热点，并在车机开启副屏共享。</string>
+    <string name="companion_sender_found">已检测到 RoadCast 共享，请输入车机显示的配对码连接。</string>
+    <string name="companion_wrong_sender">当前发现的不是已配对车机，请连接正确热点，或忘记旧配对后重新连接。</string>
+    <string name="companion_pairing_refused">配对被拒绝，请检查配对码；车机重置配对后需重新配对。</string>
     <string name="companion_sender_title">RoadCast 副屏发送</string>
     <string name="companion_receiver_title">RoadCast 手机副屏</string>
     <string name="companion_start">开始共享</string>

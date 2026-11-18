@@ -23,6 +23,30 @@ import org.robolectric.util.ReflectionHelpers
 @Config(sdk = [35], qualifiers = "zh-rCN-w400dp-h800dp-mdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CompanionDisplayTest {
+    @Test fun successfulHandshakeIsSavedBeforeNavigationAndHidesThePairingCodeAfterRestart() {
+        val first = Robolectric.buildActivity(MainActivity::class.java).create()
+        try {
+            ReflectionHelpers.setField(first.get(), "manualPairing", true)
+            val data = JSONObject().put("id", "12345678-1234-1234-1234-123456789abc")
+                .put("token", "0123456789abcdef0123456789abcdef")
+            assertTrue(ReflectionHelpers.callInstanceMethod<Boolean>(first.get(), "rememberPairing", ReflectionHelpers.ClassParameter.from(JSONObject::class.java, data)))
+            assertTrue(first.get().getPreferences(0).getBoolean("auto", false))
+        } finally { first.destroy() }
+        val reopened = Robolectric.buildActivity(MainActivity::class.java).create()
+        try {
+            assertTrue(ReflectionHelpers.getField<Boolean>(reopened.get(), "desired"))
+            assertEquals(View.GONE, ReflectionHelpers.getField<android.widget.EditText>(reopened.get(), "code").visibility)
+        } finally { reopened.get().getPreferences(0).edit().clear().commit(); reopened.destroy() }
+    }
+    @Test fun initialSetupNeedsOnlyPairingCodeAndNeverAsksForAnIpAddress() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+        try {
+            fun inputs(view: View): List<android.widget.EditText> =
+                (if (view is android.widget.EditText) listOf(view) else emptyList()) +
+                    (if (view is android.view.ViewGroup) (0 until view.childCount).flatMap { inputs(view.getChildAt(it)) } else emptyList())
+            assertEquals(1, inputs(controller.get().window.decorView).size)
+        } finally { controller.pause().stop().destroy() }
+    }
     @Test fun disconnectClearsPreviouslyVisibleGuidanceAndSong() {
         val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
         try {
@@ -36,6 +60,17 @@ class CompanionDisplayTest {
         } finally { controller.pause().stop().destroy() }
     }
     @Test fun capturesCompactLargeFont() = capture("compact-zh", 400, 800)
+    @Test fun capturesHotspotSetupLargeFont() = capture("setup-zh", 400, 800, false)
+    @Test @Config(qualifiers = "en-w960dp-h540dp-land-mdpi")
+    fun capturesHotspotSetupLandscape() = capture("setup-landscape", 960, 540, false)
+    @Test @Config(qualifiers = "ar-ldrtl-w400dp-h800dp-mdpi")
+    fun capturesHotspotSetupRtl() = capture("setup-ar", 400, 800, false)
+    @Test fun gatewayIdentityRejectsOrdinaryRoutersAndInvalidSenders() {
+        assertNull(CompanionHotspotLocator.parseIdentity("<html>router</html>"))
+        assertNull(CompanionHotspotLocator.parseIdentity("{\"service\":\"router\",\"version\":1,\"id\":\"12345678-1234-1234-1234-123456789abc\"}"))
+        assertEquals("12345678-1234-1234-1234-123456789abc", CompanionHotspotLocator.parseIdentity(
+            "{\"service\":\"roadcast-companion\",\"version\":1,\"id\":\"12345678-1234-1234-1234-123456789abc\"}"))
+    }
     @Test fun remembersPairingAcrossRecreationButExplicitDisconnectDisablesAutoConnect() {
         val first = Robolectric.buildActivity(MainActivity::class.java).create()
         first.get().getPreferences(0).edit().putString("id", "12345678-1234-1234-1234-123456789abc")
@@ -86,12 +121,12 @@ class CompanionDisplayTest {
     private fun show(activity: MainActivity, json: JSONObject) {
         ReflectionHelpers.callInstanceMethod<Unit>(activity, "render", ReflectionHelpers.ClassParameter.from(JSONObject::class.java, json))
     }
-    private fun capture(name: String, width: Int, height: Int) {
+    private fun capture(name: String, width: Int, height: Int, live: Boolean = true) {
         RuntimeEnvironment.setFontScale(1.5f)
         val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
         try {
             val activity = controller.get()
-            show(activity, sample())
+            if (live) show(activity, sample())
             val root = activity.window.decorView
             root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
             root.layout(0, 0, width, height)

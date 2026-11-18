@@ -27,7 +27,8 @@ internal class CompanionDiscovery(context: Context, private val found: (String, 
             override fun onStopDiscoveryFailed(type: String, error: Int) = Unit
             override fun onServiceLost(info: NsdServiceInfo) = Unit
             override fun onServiceFound(info: NsdServiceInfo) { main.post {
-                if (active != generation || resolving || !info.serviceName.startsWith("RoadCast-${expectedId.take(8)}")) return@post
+                val prefix = if (expectedId.isEmpty()) "RoadCast-" else "RoadCast-${expectedId.take(8)}"
+                if (active != generation || resolving || !info.serviceName.startsWith(prefix)) return@post
                 resolving = true
                 @Suppress("DEPRECATION")
                 runCatching { manager.resolveService(info, object : NsdManager.ResolveListener {

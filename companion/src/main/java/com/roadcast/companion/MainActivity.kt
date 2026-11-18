@@ -2,6 +2,11 @@ package com.roadcast.companion
 
 import android.app.Activity
 import android.content.pm.PackageManager
+import android.content.Intent
+import android.net.Network
+import android.provider.Settings
+import okhttp3.ConnectionPool
+import java.net.Proxy
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -55,6 +60,10 @@ class MainActivity : Activity() {
     private var authToken = ""
     private var manualPairing = false
     private var discovery: CompanionDiscovery? = null
+    private var hotspot: CompanionHotspotLocator? = null
+    private var wifiNetwork: Network? = null
+    private var wifiClient: OkHttpClient? = null
+    private var pairingRefused = false
     private var nextDiscovery = 0L
     private val retry = Runnable { if (desired && resumed) connect() }
     private val watchdog = object : Runnable {
@@ -90,25 +99,32 @@ class MainActivity : Activity() {
             setText(getPreferences(MODE_PRIVATE).getString("address", ""))
         }
         code = EditText(this).apply { setHint(R.string.companion_code_hint); setSingleLine(); inputType = InputType.TYPE_CLASS_NUMBER }
-        setup.addView(address); setup.addView(code)
+        setup.addView(label(17f).apply { setText(R.string.companion_hotspot_help) })
+        setup.addView(Button(this).apply {
+            setText(R.string.companion_wifi_settings)
+            setOnClickListener { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) }
+        })
+        code.visibility = if (getPreferences(MODE_PRIVATE).getString("token", "").isNullOrEmpty()) View.VISIBLE else View.GONE
+        setup.addView(code)
         setup.addView(Button(this).apply {
             setText(R.string.companion_connect)
             setOnClickListener {
                 if (Build.VERSION.SDK_INT >= 37 && checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") != PackageManager.PERMISSION_GRANTED) {
                     requestPermissions(arrayOf("android.permission.ACCESS_LOCAL_NETWORK"), 37)
                     status.setText(R.string.companion_permission)
-                } else if (!validAddress(address.text.toString().trim()) ||
-                    (!code.text.toString().matches(Regex("[0-9]{8}")) && !(code.text.isBlank() && getPreferences(MODE_PRIVATE).getString("token", "").orEmpty().isNotEmpty()))) {
-                    status.setText(R.string.companion_bad_address)
+                } else if (!code.text.toString().matches(Regex("[0-9]{8}")) && !(code.text.isBlank() && getPreferences(MODE_PRIVATE).getString("token", "").orEmpty().isNotEmpty())) {
+                    status.setText(R.string.companion_need_code)
                 } else {
                     stopConnection()
                     desired = true
+                    pairingRefused = false
                     manualPairing = code.text.isNotBlank()
                     authToken = if (manualPairing) "" else getPreferences(MODE_PRIVATE).getString("token", "").orEmpty()
                     peerAddress = address.text.toString().trim()
                     endpoint = "ws://$peerAddress/${if (manualPairing) code.text else "paired"}"
                     getPreferences(MODE_PRIVATE).edit().putString("address", address.text.toString().trim()).apply()
                     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    startHotspotDetection()
                     discover()
                     connect()
                 }
@@ -120,7 +136,7 @@ class MainActivity : Activity() {
             setOnClickListener {
                 stopConnection()
                 getPreferences(MODE_PRIVATE).edit().remove("id").remove("token").apply()
-                authToken = ""; code.setText("")
+                authToken = ""; code.setText(""); code.visibility = View.VISIBLE
             }
         })
         status = label(16f)
@@ -152,6 +168,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume(); resumed = true; main.post(watchdog)
+        startHotspotDetection()
         if (desired) {
             if (Build.VERSION.SDK_INT >= 37 && checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") != PackageManager.PERMISSION_GRANTED) {
                 status.setText(R.string.companion_permission)
@@ -164,6 +181,8 @@ class MainActivity : Activity() {
         resumed = false; generation++; socket?.cancel(); socket = null
         main.removeCallbacks(retry); main.removeCallbacks(watchdog)
         discovery?.stop()
+        hotspot?.stop(); hotspot = null
+        wifiClient?.connectionPool?.evictAll(); wifiClient = null; wifiNetwork = null
         clearDisplay(R.string.companion_stale)
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         super.onPause()
@@ -187,6 +206,11 @@ class MainActivity : Activity() {
 
     private fun connect() {
         main.removeCallbacks(retry)
+        if (!validAddress(peerAddress) || wifiClient == null) {
+            status.setText(R.string.companion_searching)
+            discover()
+            return
+        }
         val currentGeneration = ++generation
         socket?.cancel()
         lastReceived = SystemClock.elapsedRealtime(); session = ""; sequence = -1
@@ -194,7 +218,7 @@ class MainActivity : Activity() {
         val request = Request.Builder().url(endpoint).apply {
             if (authToken.isNotEmpty()) header("Authorization", "Bearer $authToken")
         }.build()
-        socket = client.newWebSocket(request, object : WebSocketListener() {
+        socket = (wifiClient ?: client).newWebSocket(request, object : WebSocketListener() {
             override fun onMessage(webSocket: WebSocket, text: String) {
                 if (text.length > 256_000) { webSocket.cancel(); return }
                 val json = runCatching { JSONObject(text) }.getOrNull() ?: return
@@ -203,18 +227,12 @@ class MainActivity : Activity() {
                     if (generation != currentGeneration || !resumed || !desired) return@post
                     val pairing = json.optJSONObject("pairing")
                     if (pairing != null) {
-                        val id = pairing.optString("id")
-                        val token = pairing.optString("token")
-                        if (!manualPairing && getPreferences(MODE_PRIVATE).getString("id", "") != id) {
-                            webSocket.cancel(); return@post
-                        }
-                        if (id.matches(Regex("[a-fA-F0-9-]{36}")) && token.matches(Regex("[a-fA-F0-9]{32}")) &&
-                            (manualPairing || authToken != token || !getPreferences(MODE_PRIVATE).getBoolean("auto", false))) {
-                            getPreferences(MODE_PRIVATE).edit().putString("id", id).putString("token", token).putBoolean("auto", true).apply()
-                            authToken = token; manualPairing = false
-                            endpoint = "ws://$peerAddress/paired"
-                            code.setText("")
-                            discover()
+                        if (!rememberPairing(pairing)) { webSocket.cancel(); return@post }
+                        if (json.optString("type") == "paired") {
+                            lastReceived = SystemClock.elapsedRealtime()
+                            status.setText(R.string.companion_pairing_saved)
+                            setup.visibility = View.GONE
+                            return@post
                         }
                     }
                     val nextSession = json.optString("session")
@@ -225,14 +243,26 @@ class MainActivity : Activity() {
                     render(json)
                 }
             }
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = failed()
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = failed(response?.code)
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(code, reason) }
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = failed()
-            private fun failed() { main.post {
+            private fun failed(statusCode: Int? = null) { main.post {
                 if (generation == currentGeneration && desired && resumed) {
                     socket = null
-                    clearDisplay(R.string.companion_retry)
-                    queueRetry()
+                    clearDisplay(when (statusCode) {
+                        403 -> R.string.companion_pairing_refused
+                        503 -> R.string.companion_sender_busy
+                        else -> R.string.companion_retry
+                    })
+                    if (statusCode == 403) {
+                        if (authToken.isNotEmpty() && !manualPairing) {
+                            status.setText(R.string.companion_remembered_retry)
+                            retrySeconds = 15
+                            queueRetry()
+                        } else {
+                            pairingRefused = true; desired = false; setup.visibility = View.VISIBLE
+                        }
+                    } else queueRetry()
                 }
             } }
         })
@@ -244,6 +274,23 @@ class MainActivity : Activity() {
             main.postDelayed(retry, retrySeconds * 1000)
             retrySeconds = (retrySeconds * 2).coerceAtMost(15)
         }
+    }
+    private fun rememberPairing(pairing: JSONObject): Boolean {
+        val id = pairing.optString("id")
+        val token = pairing.optString("token")
+        if (!id.matches(Regex("[a-fA-F0-9-]{36}")) || !token.matches(Regex("[a-fA-F0-9]{32}"))) return false
+        val prefs = getPreferences(MODE_PRIVATE)
+        if (!manualPairing && prefs.getString("id", "") != id) return false
+        if (manualPairing || authToken != token || !prefs.getBoolean("auto", false)) {
+            if (!prefs.edit().putString("id", id).putString("token", token).putBoolean("auto", true).commit()) {
+                status.setText(R.string.companion_save_failed)
+                return false
+            }
+        }
+        authToken = token; manualPairing = false
+        endpoint = "ws://$peerAddress/paired"
+        code.setText(""); code.visibility = View.GONE
+        return true
     }
     private fun stopConnection() {
         desired = false; generation++; socket?.cancel(); socket = null
@@ -257,19 +304,43 @@ class MainActivity : Activity() {
     private fun discover() {
         if (!desired || !resumed || SystemClock.elapsedRealtime() < nextDiscovery) return
         if (Build.VERSION.SDK_INT >= 37 && checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") != PackageManager.PERMISSION_GRANTED) return
-        val id = getPreferences(MODE_PRIVATE).getString("id", "").orEmpty()
-        if (id.isEmpty()) return
+        val id = if (manualPairing) "" else getPreferences(MODE_PRIVATE).getString("id", "").orEmpty()
         nextDiscovery = SystemClock.elapsedRealtime() + 15_000
         val browser = discovery ?: CompanionDiscovery(this) { foundId, foundAddress ->
-            if (!desired || !resumed || manualPairing || foundId != getPreferences(MODE_PRIVATE).getString("id", "")) return@CompanionDiscovery
-            val changed = address.text.toString() != foundAddress
-            address.setText(foundAddress)
-            peerAddress = foundAddress
-            getPreferences(MODE_PRIVATE).edit().putString("address", foundAddress).apply()
-            endpoint = "ws://$foundAddress/paired"
-            if (changed || socket == null) connect()
+            if (!desired || !resumed) return@CompanionDiscovery
+            val connectivity = getSystemService(android.net.ConnectivityManager::class.java)
+            val network = connectivity.allNetworks.firstOrNull {
+                connectivity.getNetworkCapabilities(it)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
+            } ?: return@CompanionDiscovery
+            acceptSender(network, foundId, foundAddress)
         }.also { discovery = it }
         browser.start(id)
+    }
+    private fun startHotspotDetection() {
+        if (hotspot != null || !resumed) return
+        if (Build.VERSION.SDK_INT >= 37 && checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") != PackageManager.PERMISSION_GRANTED) return
+        hotspot = CompanionHotspotLocator(this, ::acceptSender) { hasWifi ->
+            if (socket == null && (!pairingRefused || !hasWifi)) clearDisplay(if (hasWifi) R.string.companion_sender_missing else R.string.companion_no_wifi)
+        }.also { it.start() }
+    }
+    private fun acceptSender(network: Network, id: String, foundAddress: String) {
+        if (!resumed) return
+        val remembered = getPreferences(MODE_PRIVATE).getString("id", "").orEmpty()
+        if (!manualPairing && remembered.isNotEmpty() && remembered != id) {
+            if (socket == null) status.setText(R.string.companion_wrong_sender)
+            return
+        }
+        val changed = peerAddress != foundAddress || wifiNetwork != network
+        if (wifiNetwork != network) {
+            wifiClient?.connectionPool?.evictAll()
+            wifiNetwork = network
+            wifiClient = client.newBuilder().socketFactory(network.socketFactory).proxy(Proxy.NO_PROXY).connectionPool(ConnectionPool()).build()
+        }
+        peerAddress = foundAddress; address.setText(foundAddress)
+        getPreferences(MODE_PRIVATE).edit().putString("address", foundAddress).apply()
+        endpoint = "ws://$foundAddress/${if (manualPairing) code.text else "paired"}"
+        if (desired) { if (changed || socket == null) connect() }
+        else if (!pairingRefused) status.setText(R.string.companion_sender_found)
     }
     private fun clearDisplay(message: Int) {
         lastReceived = 0
